@@ -1,71 +1,32 @@
-const parseHex = (hex: string) => {
-  const buf = new ArrayBuffer(hex.length / 2);
-  const bufView = new Uint8Array(buf);
-
-  for (let i = 0; i < hex.length; i += 2) {
-    const int = parseInt(hex.substring(i, i + 2), 16);
-    if (isNaN(int)) return new ArrayBuffer(0);
-
-    bufView[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-
-  return buf;
-}
-
-const parseB64 = (b64: string) => {
-  // https://developer.mozilla.org/en-US/docs/Web/API/SubtleCrypto/importKey#subjectpublickeyinfo_import
-  const parsed = atob(b64);
-  const buf = new ArrayBuffer(parsed.length);
-  const bufView = new Uint8Array(buf);
-  for (let i = 0; i < parsed.length; i++) {
-    bufView[i] = parsed.charCodeAt(i);
-  }
-
-  return buf;
-}
+import { verify, decode, JwtData } from '@tsndr/cloudflare-worker-jwt';
 
 export default {
-  async fetch(request: Request, { PUBLIC_KEY }: { PUBLIC_KEY: string }): Promise<Response> {
+  async fetch(request: Request, { JWT_KEY }: { JWT_KEY: string }): Promise<Response> {
     const userAgent = request.headers.get('User-Agent');
     if (!userAgent) {
       return new Response("Expected a `User-Agent` header.", { status: 403 });
     }
 
     const url = new URL(request.url);
-    const subUrl = url.searchParams.get("url");
-    if (!subUrl) {
-      return new Response("`url` expected as a query parameter.", { status: 400 });
+    const jwt = url.searchParams.get("jwt");
+    if (!jwt) {
+      return new Response("`jwt` expected as a query parameter.", { status: 400 });
     }
 
-    // validate request
-    const botId = url.searchParams.get("botId");
-    const signed = url.searchParams.get("signed");
+    // jwt verification
+    const isValid = await verify(jwt, JWT_KEY);
 
-    if (!botId || !signed || isNaN(parseInt(botId))) {
-      return new Response("Need signing parameters (`botId` and `signed`).", { status: 401 });
-    }
-
-    // ed25519 verification
-    const cryptoKey = await crypto.subtle.importKey(
-      "spki",
-      parseB64(PUBLIC_KEY),
-      { name: "NODE-ED25519", namedCurve: "NODE-ED25519" },
-      false,
-      ["verify"]
-    );
-
-    const ok =  await crypto.subtle.verify(
-      "NODE-ED25519",
-      cryptoKey,
-      parseHex(signed),
-      new TextEncoder().encode(BigInt(botId).toString() + subUrl)
-    );
-
-    if (!ok) {
+    if (!isValid) {
       return new Response("Failed signature check.", { status: 403 });
     }
 
-    const requestedUrl = new URL(subUrl, url.origin);
+    const decodedJwt = decode(jwt) as JwtData & {
+      payload: {
+        url: string;
+      }
+    };
+
+    const requestedUrl = new URL(decodedJwt.payload.url);
 
     const resp = await fetch(requestedUrl.toString(), { headers: new Headers({ 'User-Agent': userAgent }) });
     const newResp = new Response(resp.body, resp);  // ??

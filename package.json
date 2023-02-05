@@ -1,0 +1,8 @@
+{
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20230115.0"
+  },
+  "dependencies": {
+    "@tsndr/cloudflare-worker-jwt": "^2.2.1"
+  }
+}
